@@ -1,3 +1,12 @@
+# About this fork
+
+This fork contains an MPD server component that is using more recent
+protocol than upstream.  Hopefully one day, this separate work is no
+longer needed.  It is based on PR's like
+[PR#1780](https://github.com/owntone/owntone-server/pull/1780) and
+[PR#1793](https://github.com/owntone/owntone-server/pull/1793).
+
+
 # OwnTone
 
 OwnTone is a media server that lets you play audio sources such as local files,
