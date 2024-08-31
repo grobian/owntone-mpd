@@ -2863,10 +2863,24 @@ mpd_command_playlistadd(struct evbuffer *evbuf, int argc, char **argv, char **er
   char *vp_item;
   int ret;
 
+  if (argc < 3)
+    {
+      *errmsg = safe_asprintf("Missing arguments to command playlistadd");
+      return ACK_ERROR_ARG;
+    }
+
   if (!allow_modifying_stored_playlists)
     {
       *errmsg = safe_asprintf("Modifying stored playlists is not enabled");
       return ACK_ERROR_PERMISSION;
+    }
+
+  /* 0.23.1: POSITION specifies where to insert, not supported by
+   * library currently */
+  if (argc >= 4)
+    {
+      *errmsg = safe_asprintf("Positional updates to playlists not supported");
+      return ACK_ERROR_SYSTEM;
     }
 
   if (!default_pl_dir || strstr(argv[1], ":/"))
@@ -4653,7 +4667,7 @@ static struct mpd_command mpd_handlers[] =
     { "listplaylistinfo",           mpd_command_listplaylistinfo,            2 },
     { "listplaylists",              mpd_command_listplaylists,              -1 },
     { "load",                       mpd_command_load,                       -1 },
-    { "playlistadd",                mpd_command_playlistadd,                 3 },
+    { "playlistadd",                mpd_command_playlistadd,                -1 },
 //    { "playlistclear",              mpd_command_playlistclear,              -1 },
 //    { "playlistdelete",             mpd_command_playlistdelete,             -1 },
 //    { "playlistmove",               mpd_command_playlistmove,               -1 },
