@@ -2773,6 +2773,13 @@ mpd_command_load(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, s
   struct player_status status;
   struct query_params qp = { .type = Q_PLITEMS };
   int ret;
+  int pos = -1;
+
+  if (argc < 2)
+    {
+      *errmsg = safe_asprintf("Missing arguments to command load");
+      return ACK_ERROR_ARG;
+    }
 
   if (!default_pl_dir || strstr(argv[1], ":/"))
     {
@@ -2794,13 +2801,29 @@ mpd_command_load(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, s
     }
 
   //TODO If a second parameter is given only add the specified range of songs to the playqueue
+  
+  /* 0.23.1: POSITION specifies where to insert in the queue */
+  if (argc >= 4)
+    {
+      struct mpd_cmd_params param;
+
+      memset(&param, 0, sizeof(param));
+
+      if (mpd_parse_cmd_position(argv[3], &param) != 0)
+      	{
+      	  *errmsg = safe_asprintf("Could not parse POSITION '%s'", argv[3]);
+      	  return ACK_ERROR_ARG;
+      	}
+
+      pos = param.pos;
+    }
 
   qp.id = pli->id;
   free_pli(pli, 0);
 
   player_get_status(&status);
 
-  ret = db_queue_add_by_query(&qp, status.shuffle, status.item_id, -1, NULL, NULL);
+  ret = db_queue_add_by_query(&qp, status.shuffle, status.item_id, pos, NULL, NULL);
   if (ret < 0)
     {
       *errmsg = safe_asprintf("Failed to add song '%s' to playlist", argv[1]);
@@ -4606,7 +4629,7 @@ static struct mpd_command mpd_handlers[] =
     { "listplaylist",               mpd_command_listplaylist,                2 },
     { "listplaylistinfo",           mpd_command_listplaylistinfo,            2 },
     { "listplaylists",              mpd_command_listplaylists,              -1 },
-    { "load",                       mpd_command_load,                        2 },
+    { "load",                       mpd_command_load,                       -1 },
     { "playlistadd",                mpd_command_playlistadd,                 3 },
 //    { "playlistclear",              mpd_command_playlistclear,              -1 },
 //    { "playlistdelete",             mpd_command_playlistdelete,             -1 },
