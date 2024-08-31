@@ -1997,8 +1997,31 @@ mpd_command_add(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, st
 {
   struct player_status status;
   int ret;
+  int pos = -1;
 
-  ret = mpd_queue_add(argv[1], false, -1);
+  if (argc < 2)
+    {
+      *errmsg = safe_asprintf("Missing arguments to command add");
+      return ACK_ERROR_ARG;
+    }
+
+  /* 0.23.3: POSITION argument */
+  if (argc >= 3)
+    {
+      struct mpd_cmd_params param;
+
+      memset(&param, 0, sizeof(param));
+
+      if (mpd_parse_cmd_position(argv[2], &param) != 0)
+      	{
+      	  *errmsg = safe_asprintf("Could not parse POSITION '%s'", argv[2]);
+      	  return ACK_ERROR_ARG;
+      	}
+
+      pos = param.pos;
+    }
+
+  ret = mpd_queue_add(argv[1], false, pos);
 
   if (ret < 0)
     {
@@ -2011,7 +2034,7 @@ mpd_command_add(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, st
       player_get_status(&status);
 
       // Given path is not in the library, check if it is possible to add as a non-library queue item
-      ret = library_queue_item_add(argv[1], -1, status.shuffle, status.item_id, NULL, NULL);
+      ret = library_queue_item_add(argv[1], pos, status.shuffle, status.item_id, NULL, NULL);
       if (ret != LIBRARY_OK)
 	{
 	  *errmsg = safe_asprintf("Failed to add song '%s' to playlist (unkown path)", argv[1]);
@@ -4602,7 +4625,7 @@ static struct mpd_command mpd_handlers[] =
     { "stop",                       mpd_command_stop,                       -1 },
 
     // The current playlist
-    { "add",                        mpd_command_add,                         2 },
+    { "add",                        mpd_command_add,                        -1 },
     { "addid",                      mpd_command_addid,                       2 },
     { "clear",                      mpd_command_clear,                      -1 },
     { "delete",                     mpd_command_delete,                     -1 },
