@@ -474,6 +474,38 @@ mpd_pars_quoted(char **input)
   return arg;
 }
 
+/**
+ * Helper for writing binary responses.
+ * https://mpd.readthedocs.io/en/latest/protocol.html#binary
+ * This helper writes the size line, and binary blocks respecting the
+ * binarylimit.
+ */
+static bool
+mpd_write_binary_response(struct mpd_client_ctx *ctx,
+			  struct evbuffer *output,
+			  struct evbuffer *data,
+			  size_t offset)
+{
+  unsigned char *p;
+  size_t len = evbuffer_get_length(data);
+
+  if (len == 0 || len < offset)
+    return false;
+
+  /* write header for total size */
+  evbuffer_add_printf(output, "size: %zu\n", len);
+
+  len = MIN(len - offset, ctx->binarylimit);
+  evbuffer_drain(data, offset);
+  p = evbuffer_pullup(data, len);
+  evbuffer_add_printf(output, "binary: %zu\n", len);
+  evbuffer_add(output, p, len);
+  evbuffer_add(output, "\n", 1);
+  evbuffer_drain(data, len);
+
+  return true;
+}
+
 /*
  * Parses the argument string into an array of strings.
  * Arguments are seperated by a whitespace character and may be wrapped in double quotes.
