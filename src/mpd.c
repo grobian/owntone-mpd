@@ -181,6 +181,7 @@ struct mpd_tagtype
   bool group_in_listcommand;
 };
 
+/* https://mpd.readthedocs.io/en/latest/protocol.html#tags */
 static struct mpd_tagtype tagtypes[] =
   {
     /* tag               | db field             | db sort field                        | db group field  | type             | media_file offset                | group_in_listcommand */
@@ -189,14 +190,33 @@ static struct mpd_tagtype tagtypes[] =
     // { "Artist",           "f.artist",             "f.artist",             "f.artist",             MPD_TYPE_STRING,   dbmfi_offsetof(artist), },
     { "Artist",           "f.album_artist",       "f.album_artist_sort, f.album_artist", "f.songartistid", MPD_TYPE_STRING,   dbmfi_offsetof(album_artist),      false, },
     { "ArtistSort",       "f.album_artist_sort",  "f.album_artist_sort, f.album_artist", "f.songartistid", MPD_TYPE_STRING,   dbmfi_offsetof(album_artist_sort), false, },
+    { "Album",            "f.album",              "f.album_sort, f.album",               "f.songalbumid",  MPD_TYPE_STRING,   dbmfi_offsetof(album),             false, },
+    { "AlbumSort",        "f.album_sort",         "f.album_sort, f.album",               "f.songalbumid",  MPD_TYPE_STRING,   dbmfi_offsetof(album),             false, },
     { "AlbumArtist",      "f.album_artist",       "f.album_artist_sort, f.album_artist", "f.songartistid", MPD_TYPE_STRING,   dbmfi_offsetof(album_artist),      false, },
     { "AlbumArtistSort",  "f.album_artist_sort",  "f.album_artist_sort, f.album_artist", "f.songartistid", MPD_TYPE_STRING,   dbmfi_offsetof(album_artist_sort), false, },
-    { "Album",            "f.album",              "f.album_sort, f.album",               "f.songalbumid",  MPD_TYPE_STRING,   dbmfi_offsetof(album),             false, },
-    { "Title",            "f.title",              "f.title",                             "f.title",        MPD_TYPE_STRING,   dbmfi_offsetof(title),             true, },
+    { "Title",            "f.title",              "f.title",                             "f.title_sort",   MPD_TYPE_STRING,   dbmfi_offsetof(title),             true, },
+    { "TitleSort",        "f.title_sort",         "f.title",                             "f.title_sort",   MPD_TYPE_STRING,   dbmfi_offsetof(title),             true, },
     { "Track",            "f.track",              "f.track",                             "f.track",        MPD_TYPE_INT,      dbmfi_offsetof(track),             true, },
+    { "Name",             "f.title",              "f.title_sort",                        "f.title",        MPD_TYPE_STRING,   dbmfi_offsetof(genre),             true, },
     { "Genre",            "f.genre",              "f.genre",                             "f.genre",        MPD_TYPE_STRING,   dbmfi_offsetof(genre),             true, },
-    { "Disc",             "f.disc",               "f.disc",                              "f.disc",         MPD_TYPE_INT,      dbmfi_offsetof(disc),              true, },
+    /* mood */
     { "Date",             "f.year",               "f.year",                              "f.year",         MPD_TYPE_INT,      dbmfi_offsetof(year),              true, },
+    { "OriginalDate",     "f.date_released",      "f.date_released",                     "f.date_released", MPD_TYPE_INT,      dbmfi_offsetof(date_released),     true, },
+    { "Composer",         "f.composer",           "f.composer_sort",                     "f.composer",     MPD_TYPE_STRING, dbmfi_offsetof(composer),          true, },
+    { "ComposerSort",     "f.composer_sort",       "f.composer_sort",                     "f.composer_sort", MPD_TYPE_STRING, dbmfi_offsetof(composer_sort),     true, },
+    /* performer */
+    { "Conductor",        "f.conductor",           "f.conductor",                         "f.conductor",     MPD_TYPE_STRING, dbmfi_offsetof(conductor),         true, },
+    /* work */
+    /* ensemble */
+    /* movement */
+    /* movementnumber */
+    /* location */
+    { "Grouping",         "f.grouping",            "f.grouping",                          "f.grouping",      MPD_TYPE_STRING, dbmfi_offsetof(grouping),          true, },
+    { "Comment",          "f.comment",             "f.comment",                           "f.comment",       MPD_TYPE_STRING, dbmfi_offsetof(comment),           true, },
+    { "Disc",             "f.disc",                "f.disc",                              "f.disc",          MPD_TYPE_INT,      dbmfi_offsetof(disc),              true, },
+    /* label */
+    /* musicbrainz_* */
+    /* below are pseudo tags not defined in the docs */
     { "file",             NULL,                   NULL,                                  NULL,             MPD_TYPE_SPECIAL,  -1,                                true, },
     { "base",             NULL,                   NULL,                                  NULL,             MPD_TYPE_SPECIAL,  -1,                                true, },
     { "any",              NULL,                   NULL,                                  NULL,             MPD_TYPE_SPECIAL,  -1,                                true, },
