@@ -3126,7 +3126,7 @@ mpd_command_find(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, s
   struct db_media_file_info dbmfi;
   int ret;
 
-  if (argc < 3 || ((argc - 1) % 2) != 0)
+  if (argc < 2)
     {
       *errmsg = safe_asprintf("Missing argument(s) for command 'find'");
       return ACK_ERROR_ARG;
