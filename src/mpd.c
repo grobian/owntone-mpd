@@ -216,7 +216,8 @@ static struct mpd_tagtype tagtypes[] =
     { "Disc",             "f.disc",                "f.disc",                              "f.disc",          MPD_TYPE_INT,      dbmfi_offsetof(disc),              true, },
     /* label */
     /* musicbrainz_* */
-    /* below are pseudo tags not defined in the docs */
+    /* below are pseudo tags not defined in the docs but used in
+     * examples */
     { "file",             NULL,                   NULL,                                  NULL,             MPD_TYPE_SPECIAL,  -1,                                true, },
     { "base",             NULL,                   NULL,                                  NULL,             MPD_TYPE_SPECIAL,  -1,                                true, },
     { "any",              NULL,                   NULL,                                  NULL,             MPD_TYPE_SPECIAL,  -1,                                true, },
@@ -917,7 +918,7 @@ mpd_parse_cmd_position(char *arg, struct mpd_cmd_params *param)
 }
 
 /**
- * {(THING EXPR VALUE)}
+ * {(TAG [OP] VALUE)}
  *
  * parse filter expression on THING being VALUE in relation to EXPR.
  * The possible expressions can be found at:
@@ -929,16 +930,506 @@ mpd_parse_cmd_position(char *arg, struct mpd_cmd_params *param)
  * by some tag to indicate what the type is and that there are
  * single-argument filters (as opposed to key/value), thus the filter
  * command is run for as long as no other known tag is found.
+ *
+ * The parsed input here comes from e.g. the find command:
+ *   find "((album == \"Flash Gordon\"))"    (post v0.21)
+ *   find album "Flash Gordon"               (<= v0.21)
+ * and we deal with
+ *   argv[1]: ((album == "Flash Gordon"))    (post v0.21)
+ *   argv[1]: album  argv[2]: Flash Gordon   (<= v0.21)
+ * here.
+ * While the double ( ) is what's in the official docs, and seen with
+ * some clients, others use just a single pair and single quotes (like
+ * Maximum MPD).
+ *
+ * If narg is used, it is truncated to the empty string (*narg == '\0')
  */
 static int
 mpd_parse_cmd_filter(char *arg, char *narg, struct mpd_cmd_params *param)
 {
   char *condition = NULL;
   bool exact_match = param->exactmatch;
+  size_t len = 0;
 
-  if (narg != NULL)
+  /* determine if we're using v0.21 syntax */
+  if (arg[0] == '(' && (len = strlen(arg)) > 2 && arg[len - 1] == ')')
+    {
+      bool first = true;
+      bool negate = false;
+      char *p;
+      char *q;
+      char *val = NULL;
+      char *argend = &arg[len - 1];
+      struct mpd_tagtype *tagtype = NULL;
+      enum parsestate {
+      	  STATE_INIT,
+      	  STATE_EXPR,
+      	  STATE_FINI,
+      	  STATE_OP,
+      	  STATE_VAL
+      } state = STATE_INIT;
+      enum operator {  /* CI: case-insensitive, CS, case-sensitive */
+      	  OP_NONE,
+      	  OP_EQUALS,   /* order below matters for promotion to CI/CS */
+      	  OP_EQUALS_CI,
+      	  OP_EQUALS_CS,
+      	  OP_NEQUALS,
+      	  OP_NEQUALS_CI,
+      	  OP_NEQUALS_CS,
+      	  OP_CONTAINS,
+      	  OP_CONTAINS_CI,
+      	  OP_CONTAINS_CS,
+      	  OP_NCONTAINS,
+      	  OP_NCONTAINS_CI,
+      	  OP_NCONTAINS_CS,
+      	  OP_STARTSWITH,
+      	  OP_STARTSWITH_CI,
+      	  OP_STARTSWITH_CS,
+      	  OP_NSTARTSWITH,
+      	  OP_NSTARTSWITH_CI,
+      	  OP_NSTARTSWITH_CS,
+      	  OP_REGEX,
+      	  OP_NREGEX,
+      	  OP_GREQ
+      } op = OP_NONE;
+
+      /* ((TAG [OP] VALUE)) */
+      /* the double parenthesis are used in just two cases:
+       * - negation    (!(artist == "VAL"))
+       * - conjunction ((artist == "FOO") AND (album == "BAR"))
+       * this means we need to proper-parse the values, since we need to
+       * know the closing parenthesis is real, and not inside the value
+       * to possible parse another expression (via AND) */
+      for (p = &arg[1]; p < argend; p++)
+      	{
+      	  DPRINTF(E_DBG, L_MPD, "state: %u, tagtype=%s, op=%u, val=%s\n",
+      	      	  state, tagtype ? tagtype->tag : "?", op, val ? val : "?");
+      	  switch (state)
+      	    {
+      	    case STATE_INIT:
+      	      tagtype = NULL;
+      	      op = OP_NONE;
+      	      switch (*p)
+      	    	{
+      	    	case '!':
+      	    	  negate = true;
+      	    	  break;
+      	    	case '(':
+      	    	  state = STATE_EXPR;
+      	    	  break;
+      	    	default:
+      	    	  if (first)
+      	    	    {
+      	    	      /* deal with clients that do a single expression
+      	    	       * without the double pair of parenthesis, faking
+      	    	       * the start and end parenthesis */
+      	    	      p--;
+      	    	      argend++;
+      	    	      state = STATE_EXPR;
+      	    	      break;
+      	    	    }
+      	    	  /* silently eat away garbage we don't grok */
+      	    	  negate = false;
+      	    	  break;
+      	    	}
+      	      break;
+      	    case STATE_EXPR:
+      	      /* TAG<space> -- hunt for the space, lookup tag */
+      	      for (q = p; *q != ' ' && q < argend; q++)
+      	      	;
+      	      if (q == argend)
+      	      	{
+      	      	  state = STATE_INIT;
+      	      	}
+      	      else
+      	      	{
+      	      	  *q = '\0';
+      	      	  tagtype = find_tagtype(p);
+      	      	  if (tagtype == NULL)
+	  	    {
+	  	      DPRINTF(E_WARN, L_MPD,
+	  	  	      "Tag '%s' is not supported, condition ignored\n",
+	  	  	      p);
+	  	      state = STATE_INIT;
+	  	    }
+	  	  else
+	  	    {
+	  	      if (strcmp(tagtype->tag, "base") == 0 ||
+	  	      	  strcmp(tagtype->tag, "modified-since") == 0 ||
+	  	      	  /* added-since: not supported (yet) */ false)
+	  	      	{
+	  	      	  /* these expressions somehow lack an operator,
+	  	      	   * the meaning is special per tag */
+	  	      	  op = OP_NONE;
+	  	      	  state = STATE_VAL;
+	  	      	}
+	  	      else
+	  	      	{
+	  	      	  state = STATE_OP;
+	  	      	}
+	  	    }
+      	      	  p = q;
+      	      	}
+      	      break;
+      	    case STATE_OP:
+      	      /* OP<space> -- hunt for the space */
+      	      for (q = p; *q != ' ' && q < argend; q++)
+      	      	;
+      	      if (q == argend)
+      	      	{
+      	      	  state = STATE_INIT;
+      	      	}
+      	      else
+      	      	{
+      	      	  *q = '\0';
+      	      	  if (strcmp(p, ">=") == 0)
+      	      	    op = OP_GREQ;
+      	      	  else if (strcmp(p, "==") == 0)
+      	      	    op = OP_EQUALS;
+      	      	  else if (strcmp(p, "!=") == 0)
+      	      	    op = OP_NEQUALS;
+      	      	  else if (strcmp(p, "eq_cs") == 0)
+      	      	    op = OP_EQUALS_CS;
+      	      	  else if (strcmp(p, "!eq_cs") == 0)
+      	      	    op = OP_NEQUALS_CS;
+      	      	  else if (strcmp(p, "eq_ci") == 0)
+      	      	    op = OP_EQUALS_CI;
+      	      	  else if (strcmp(p, "!eq_ci") == 0)
+      	      	    op = OP_NEQUALS_CI;
+      	      	  else if (strcmp(p, "=~") == 0)
+      	      	    op = OP_REGEX;
+      	      	  else if (strcmp(p, "!~") == 0)
+      	      	    op = OP_NREGEX;
+      	      	  else if (strcmp(p, "contains") == 0)
+      	      	    op = OP_CONTAINS;
+      	      	  else if (strcmp(p, "!contains") == 0)
+      	      	    op = OP_NCONTAINS;
+      	      	  else if (strcmp(p, "contains_cs") == 0)
+      	      	    op = OP_CONTAINS_CS;
+      	      	  else if (strcmp(p, "!contains_cs") == 0)
+      	      	    op = OP_NCONTAINS_CS;
+      	      	  else if (strcmp(p, "contains_ci") == 0)
+      	      	    op = OP_CONTAINS_CI;
+      	      	  else if (strcmp(p, "!contains_ci") == 0)
+      	      	    op = OP_NCONTAINS_CI;
+      	      	  else if (strcmp(p, "startswith") == 0)
+      	      	    op = OP_STARTSWITH;
+      	      	  else if (strcmp(p, "!startswith") == 0)
+      	      	    op = OP_NSTARTSWITH;
+      	      	  else if (strcmp(p, "startswith_cs") == 0)
+      	      	    op = OP_STARTSWITH_CS;
+      	      	  else if (strcmp(p, "!startswith_cs") == 0)
+      	      	    op = OP_NSTARTSWITH_CS;
+      	      	  else if (strcmp(p, "startswith_ci") == 0)
+      	      	    op = OP_STARTSWITH_CI;
+      	      	  else if (strcmp(p, "!startswith_ci") == 0)
+      	      	    op = OP_NSTARTSWITH_CI;
+      	      	  else
+      	      	    {
+	  	      DPRINTF(E_WARN, L_MPD,
+	  	  	      "Operator '%s' is not supported, "
+	  	  	      "condition ignored\n",
+	  	  	      p);
+      	      	      state = STATE_INIT;
+      	      	      break;
+      	      	    }
+
+      	      	  /* exactmatch is actually "find" commands, which are
+      	      	   * case-sensitive, the rest ignore case, promote the
+      	      	   * non-explicit ones (v0.24)
+      	      	   * further, historically search used strstr behaviour,
+      	      	   * find strcmp, so promote equals to contains when
+      	      	   * used with search */
+      	      	  switch (op)
+      	      	    {
+      	      	    case OP_EQUALS:
+      	      	    case OP_NEQUALS:
+      	      	      /* don't promote equals when used on numbers */
+      	      	      if (tagtype->type == MPD_TYPE_INT)
+      	      	      	break;
+      	      	      if (!exact_match)
+      	      	      	op += 6;
+      	      	    case OP_CONTAINS:
+      	      	    case OP_NCONTAINS:
+      	      	    case OP_STARTSWITH:
+      	      	    case OP_NSTARTSWITH:
+      	      	      op += exact_match ? 2 : 1;
+      	      	      break;
+      	      	    default:
+      	      	      /* nothing to do */
+      	      	      break;
+      	      	    }
+
+		  /* simplify handling in FINI */
+      	      	  if (negate)
+      	      	    {
+      	      	      switch (op)
+      	      	      	{
+      	      	      	case OP_EQUALS:
+      	      	      	case OP_EQUALS_CI:
+      	      	      	case OP_EQUALS_CS:
+      	      	      	case OP_CONTAINS_CI:
+      	      	      	case OP_CONTAINS_CS:
+      	      	      	case OP_STARTSWITH_CI:
+      	      	      	case OP_STARTSWITH_CS:
+      	      	      	  op += 3;  /* become NOT */
+      	      	      	  break;
+      	      	      	case OP_NEQUALS:
+      	      	      	case OP_NEQUALS_CI:
+      	      	      	case OP_NEQUALS_CS:
+      	      	      	case OP_NCONTAINS:
+      	      	      	case OP_NCONTAINS_CI:
+      	      	      	case OP_NCONTAINS_CS:
+      	      	      	case OP_NSTARTSWITH:
+      	      	      	case OP_NSTARTSWITH_CI:
+      	      	      	case OP_NSTARTSWITH_CS:
+      	      	      	  op -= 3;  /* remove NOT */
+      	      	      	  break;
+      	      	      	default:
+      	      	      	  /* nothing to do */
+      	      	      	  break;
+      	      	      	}
+      	      	    }
+
+      	      	  p = q;
+      	      	  state = STATE_VAL;
+      	      	}
+      	      break;
+      	    case STATE_VAL:
+      	      switch (*p)
+      	      	{
+      	      	case '0':
+      	      	case '1':
+      	      	case '2':
+      	      	case '3':
+      	      	case '4':
+      	      	case '5':
+      	      	case '6':
+      	      	case '7':
+      	      	case '8':
+      	      	case '9':
+      	      	  /* VAL) -- hunt for the closing parenthesis */
+      	      	  for (q = p; *q != ')' && q < argend; q++)
+      	      	    ;
+      	      	  if (q == argend)
+      	      	    {
+      	      	      state = STATE_INIT;
+      	      	    }
+      	      	  else
+      	      	    {
+      	  	      *q = '\0';
+      	      	      val = p;
+      	      	      state = STATE_FINI;
+      	      	    }
+      	      	  break;
+      	      	case '"':
+      	      	case '\'':
+      	      	    {
+      	      	      char *quote = p;
+      	      	      for (q = ++p; q < argend; q++)
+      	      	      	{
+      	      	      	  if (*q == *quote)
+      	      	      	    break;
+      	      	      	  if (*q == '\\')
+      	      	      	    *p++ = *++q;
+      	      	      	  else
+      	      	      	    *p++ = *q;
+      	      	      	}
+      	      	      if (q == argend)
+      	      	      	{
+      	      	      	  state = STATE_INIT;
+      	      	      	}
+      	      	      else
+      	      	      	{
+      	      	      	  *p = '\0';
+      	      	      	  p = q;
+      	      	      	  val = quote + 1;
+      	      	      	  state = STATE_FINI;
+      	      	      	}
+      	      	    }
+      	      	  break;
+      	      	default:
+	  	  DPRINTF(E_WARN, L_MPD,
+	  	  	  "illegal value for expression: '%s'\n",
+	  	  	  p);
+      	      	  state = STATE_INIT;
+      	      	  break;
+      	      	}
+      	      break;
+      	    case STATE_FINI:
+      	      	{
+      	      	  char *sqlopstr;
+
+      	      	  /* push out expression, take negate into account
+      	      	   * recursing here for reuse would be nice, but there
+      	      	   * are a bunch of subtle differences which make this
+      	      	   * not as straightforward as it ought to be */
+
+      	      	  switch (op)
+      	      	    {
+      	      	    case OP_GREQ:
+      	      	      if (negate)
+      	      	      	sqlopstr = "(%s < %u)";
+      	      	      else
+      	      	      	sqlopstr = "(%s >= %u)";
+      	      	      break;
+      	      	    case OP_EQUALS:
+      	      	      sqlopstr = "(%s = %u)";
+      	      	      break;
+      	      	    case OP_NEQUALS:
+      	      	      sqlopstr = "(%s != %u)";
+      	      	      break;
+      	      	    case OP_EQUALS_CI:
+      	      	      sqlopstr = "(%s LIKE '%q')";
+      	      	      break;
+      	      	    case OP_NEQUALS_CI:
+      	      	      sqlopstr = "(%s NOT LIKE '%q')";
+      	      	      break;
+      	      	    case OP_EQUALS_CS:
+      	      	      sqlopstr = "(%s = '%q')";
+      	      	      break;
+      	      	    case OP_NEQUALS_CS:
+      	      	      sqlopstr = "(%s != '%q')";
+      	      	      break;
+      	      	    case OP_CONTAINS_CI:
+      	      	      sqlopstr = "(%s LIKE '%%%q%%')";
+      	      	      break;
+      	      	    case OP_NCONTAINS_CI:
+      	      	      sqlopstr = "(%s NOT LIKE '%%%q%%')";
+      	      	      break;
+      	      	    case OP_CONTAINS_CS:
+      	      	      sqlopstr = "(%s GLOB '*%q*')";
+      	      	      break;
+      	      	    case OP_NCONTAINS_CS:
+      	      	      sqlopstr = "(%s NOT GLOB '*%q*')";
+      	      	      break;
+      	      	    case OP_STARTSWITH_CI:
+      	      	      sqlopstr = "(%s LIKE '%q%%')";
+    		      break;
+      	      	    case OP_NSTARTSWITH_CI:
+      	      	      sqlopstr = "(%s NOT LIKE '%q%%')";
+    		      break;
+      	      	    case OP_STARTSWITH_CS:
+      	      	      sqlopstr = "(%s GLOB '%q*')";
+    		      break;
+      	      	    case OP_NSTARTSWITH_CS:
+      	      	      sqlopstr = "(%s NOT GLOB '%q*')";
+    		      break;
+      	  	    case OP_REGEX:
+      	      	      sqlopstr = "(%s REGEX '%q')";
+      	      	      break;
+      	  	    case OP_NREGEX:
+      	      	      sqlopstr = "(NOT %s REGEX '%q')";
+      	      	      break;
+      	      	    default:
+      	      	      sqlopstr = NULL;  /* invalid, cause crash */
+      	      	      break;
+      	      	    }
+
+      		  if (tagtype->type == MPD_TYPE_STRING)
+		    {
+		      condition = db_mprintf(sqlopstr,
+		      			     tagtype->field,
+		      			     val);
+		    }
+      		  else if (tagtype->type == MPD_TYPE_INT)
+		    {
+	  	      uint32_t num;
+	  	      int ret = safe_atou32(val, &num);
+	  	      if (ret < 0)
+	    		DPRINTF(E_WARN, L_MPD,
+	    	    		"%s parameter '%s' is not an integer and "
+	    	    		"will be ignored\n", tagtype->tag, val);
+	  	      else
+		      	condition = db_mprintf(sqlopstr,
+		      			       tagtype->field,
+		      			       num);
+		    }
+      		  else if (tagtype->type == MPD_TYPE_SPECIAL)
+		    {
+	  	      if (strcmp(tagtype->tag, "any") == 0)
+	    		{
+	    		  char *tmp;
+	      		  /* this really is a hack, the documentation
+	      		   * says it should check *all* tag types, not
+	      		   * just these three */
+	      		  condition = db_mprintf("(");
+	      		  tmp = db_mprintf(sqlopstr, "f.artist", val);
+	      		  append_string(&condition, tmp, NULL);
+	      		  free(tmp);
+	      		  tmp = db_mprintf(sqlopstr, "f.album", val);
+	      		  append_string(&condition, tmp, " OR ");
+	      		  free(tmp);
+	      		  tmp = db_mprintf(sqlopstr, "f.title", val);
+	      		  append_string(&condition, tmp, " OR ");
+	      		  free(tmp);
+	      		  append_string(&condition, ")", NULL);
+	    		}
+	  	      else if (strcmp(tagtype->tag, "file") == 0 ||
+	  	      	       strcmp(tagtype->tag, "base") == 0)
+	    		{
+		      	  condition = db_mprintf(sqlopstr,
+		      			     	 tagtype->field,
+		      			     	 val);
+	    		}
+	  	      else if (strcmp(tagtype->tag, "modified-since") == 0)
+	    		{
+	      		  char *datefmt;
+
+	      		  /* according to the mpd protocol specification
+	      		   * the value can be a unix timestamp or ISO8601 */
+	      		  if (strchr(val, '-') == NULL)
+	      		    datefmt = "unixepoch";
+	      		  else
+	      		    datefmt = "utc";
+
+	      		  condition =
+			    db_mprintf("(f.time_modified > strftime('%%s', "
+			   	       "datetime('%q', '%s')))", val, datefmt);
+	    		}
+	  	      else
+	    		{
+	      		  DPRINTF(E_WARN, L_MPD,
+	      	      		  "Unknown special parameter '%s' "
+	      	      		  "will be ignored\n",
+	      	      		  tagtype->tag);
+	    		}
+		    }
+
+  		  if (condition != NULL)
+    		    {
+      		      struct query_params *qp = &param->qp;
+
+      		      append_string(&qp->filter, condition, " AND ");
+
+      		      free(condition);
+      		      condition = NULL;
+
+      		      param->params_set |= CMD_FILTER;
+    		    }
+
+    		  if (*p == ')')
+    		    p++;
+    		  while (*p == ' ')
+    		    p++;
+    		  if (strcasecmp(p, "AND") == 0)
+    		    p += 3;
+
+      	      	  negate = false;
+      	      	  state = STATE_INIT;
+      	      	  break;
+      	    	}
+      	    }
+      	  first = false;
+      	}
+
+      return 0;
+    }
+  else if (narg != NULL)
     {
       struct mpd_tagtype *tagtype = find_tagtype(arg);
+
+      /* arg: TYPE, narg: VALUE */
 
       if (!tagtype)
 	{
@@ -1009,6 +1500,7 @@ mpd_parse_cmd_filter(char *arg, char *narg, struct mpd_cmd_params *param)
 	      return 1;
 	    }
 	}
+      *narg = '\0';  /* flag value being used */
     }
   else
     {
@@ -1089,7 +1581,7 @@ mpd_parse_cmd_params(int argc, char **argv, struct mpd_cmd_params *param)
       if ((param->params_allow & cmd) == CMD_UNSET)
       	continue;
 
-      /* currently all commands need a single argument */
+      /* currently all but filter commands need a single argument */
       if (cmd != CMD_FILTER && i + 1 >= argc)
       	{
 	  DPRINTF(E_WARN, L_MPD,
@@ -1131,6 +1623,8 @@ mpd_parse_cmd_params(int argc, char **argv, struct mpd_cmd_params *param)
       	      if (i + 1 < argc)
       	      	nextarg = argv[i + 1];
       	      ret |= mpd_parse_cmd_filter(argv[i], nextarg, param);
+      	      if (nextarg != NULL && *nextarg != '\0')
+      	      	i--;
       	      break;
       	    }
       	case CMD_UNSET:
@@ -3082,9 +3576,9 @@ mpd_command_count(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, 
   struct filecount_info fci;
   int ret;
 
-  if (argc < 3 || ((argc - 1) % 2) != 0)
+  if (argc < 2)
     {
-      *errmsg = safe_asprintf("Missing argument(s) for command 'find'");
+      *errmsg = safe_asprintf("Missing argument(s) for command 'count'");
       return ACK_ERROR_ARG;
     }
 
