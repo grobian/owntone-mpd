@@ -3124,9 +3124,15 @@ mpd_command_listplaylist(struct evbuffer *evbuf, int argc, char **argv, char **e
 {
   char *path;
   struct playlist_info *pli;
-  struct query_params qp;
   struct db_media_file_info dbmfi;
+  struct mpd_cmd_params param;
   int ret;
+
+  if (argc < 2)
+    {
+      *errmsg = safe_asprintf("Missing argument for listplaylist");
+      return ACK_ERROR_ARG;
+    }
 
   if (!default_pl_dir || strstr(argv[1], ":/"))
     {
@@ -3147,16 +3153,19 @@ mpd_command_listplaylist(struct evbuffer *evbuf, int argc, char **argv, char **e
       return ACK_ERROR_ARG;
     }
 
-  memset(&qp, 0, sizeof(struct query_params));
+  memset(&param, 0, sizeof(param));
 
-  qp.type = Q_PLITEMS;
-  qp.idx_type = I_NONE;
-  qp.id = pli->id;
+  param.qp.type = Q_PLITEMS;
+  param.qp.idx_type = I_NONE;
+  param.qp.id = pli->id;
 
-  ret = db_query_start(&qp);
+  if (argc >= 3)
+    mpd_parse_cmd_window(argv[2], &param);
+
+  ret = db_query_start(&param.qp);
   if (ret < 0)
     {
-      db_query_end(&qp);
+      db_query_end(&param.qp);
 
       free_pli(pli, 0);
 
@@ -3164,14 +3173,14 @@ mpd_command_listplaylist(struct evbuffer *evbuf, int argc, char **argv, char **e
       return ACK_ERROR_UNKNOWN;
     }
 
-  while ((ret = db_query_fetch_file(&dbmfi, &qp)) == 0)
+  while ((ret = db_query_fetch_file(&dbmfi, &param.qp)) == 0)
     {
       evbuffer_add_printf(evbuf,
 	  "file: %s\n",
 	  (dbmfi.virtual_path + 1));
     }
 
-  db_query_end(&qp);
+  db_query_end(&param.qp);
 
   free_pli(pli, 0);
 
@@ -3187,9 +3196,15 @@ mpd_command_listplaylistinfo(struct evbuffer *evbuf, int argc, char **argv, char
 {
   char *path;
   struct playlist_info *pli;
-  struct query_params qp;
+  struct mpd_cmd_params param;
   struct db_media_file_info dbmfi;
   int ret;
+
+  if (argc < 2)
+    {
+      *errmsg = safe_asprintf("Missing argument for listplaylistinfo");
+      return ACK_ERROR_ARG;
+    }
 
   if (!default_pl_dir || strstr(argv[1], ":/"))
     {
@@ -3210,16 +3225,19 @@ mpd_command_listplaylistinfo(struct evbuffer *evbuf, int argc, char **argv, char
       return ACK_ERROR_NO_EXIST;
     }
 
-  memset(&qp, 0, sizeof(struct query_params));
+  memset(&param, 0, sizeof(param));
 
-  qp.type = Q_PLITEMS;
-  qp.idx_type = I_NONE;
-  qp.id = pli->id;
+  param.qp.type = Q_PLITEMS;
+  param.qp.idx_type = I_NONE;
+  param.qp.id = pli->id;
 
-  ret = db_query_start(&qp);
+  if (argc >= 3)
+    mpd_parse_cmd_window(argv[2], &param);
+
+  ret = db_query_start(&param.qp);
   if (ret < 0)
     {
-      db_query_end(&qp);
+      db_query_end(&param.qp);
 
       free_pli(pli, 0);
 
@@ -3227,7 +3245,7 @@ mpd_command_listplaylistinfo(struct evbuffer *evbuf, int argc, char **argv, char
       return ACK_ERROR_UNKNOWN;
     }
 
-  while ((ret = db_query_fetch_file(&dbmfi, &qp)) == 0)
+  while ((ret = db_query_fetch_file(&dbmfi, &param.qp)) == 0)
     {
       ret = mpd_add_db_media_file_info(evbuf, &dbmfi);
       if (ret < 0)
@@ -3236,7 +3254,7 @@ mpd_command_listplaylistinfo(struct evbuffer *evbuf, int argc, char **argv, char
 	}
     }
 
-  db_query_end(&qp);
+  db_query_end(&param.qp);
 
   free_pli(pli, 0);
 
@@ -5178,8 +5196,8 @@ static struct mpd_command mpd_handlers[] =
 //    { "cleartagid",                 mpd_command_cleartagid,                 -1 },
 
     // Stored playlists
-    { "listplaylist",               mpd_command_listplaylist,                2 },
-    { "listplaylistinfo",           mpd_command_listplaylistinfo,            2 },
+    { "listplaylist",               mpd_command_listplaylist,               -1 },
+    { "listplaylistinfo",           mpd_command_listplaylistinfo,           -1 },
     { "listplaylists",              mpd_command_listplaylists,              -1 },
     { "load",                       mpd_command_load,                       -1 },
     { "playlistadd",                mpd_command_playlistadd,                -1 },
