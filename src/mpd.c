@@ -3479,12 +3479,34 @@ static int
 mpd_command_save(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, struct mpd_client_ctx *ctx)
 {
   char *virtual_path;
+  struct playlist_info *pli;
   int ret;
+  enum {
+      SAVEMODE_CREATE,
+      SAVEMODE_APPEND,
+      SAVEMODE_REPLACE
+  } save_mode = SAVEMODE_CREATE;  /* default */
+
+  if (argc < 2)
+    {
+      *errmsg = safe_asprintf("Missing arguments to command save");
+      return ACK_ERROR_ARG;
+    }
 
   if (!allow_modifying_stored_playlists)
     {
       *errmsg = safe_asprintf("Modifying stored playlists is not enabled");
       return ACK_ERROR_PERMISSION;
+    }
+
+  if (argc >= 3)
+    {
+      if (strcasecmp(argv[2], "create") == 0)
+      	save_mode = SAVEMODE_CREATE;
+      else if (strcasecmp(argv[2], "append") == 0)
+      	save_mode = SAVEMODE_APPEND;
+      else if (strcasecmp(argv[2], "replace") == 0)
+      	save_mode = SAVEMODE_REPLACE;
     }
 
   if (!default_pl_dir || strstr(argv[1], ":/"))
@@ -3498,7 +3520,65 @@ mpd_command_save(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, s
       virtual_path = safe_asprintf("%s/%s", default_pl_dir, argv[1]);
     }
 
-  ret = library_queue_save(virtual_path);
+  /* lookup the playlist to see if it exists */
+  pli = db_pl_fetch_byvirtualpath(virtual_path);
+
+  if (pli)
+    free_pli(pli, 0);
+
+  if (pli && save_mode == SAVEMODE_CREATE)
+    {
+      *errmsg = safe_asprintf("Playlist already exists by that name: %s",
+      			      virtual_path);
+      free(virtual_path);
+      return ACK_ERROR_ARG;
+    }
+  else if (!pli && save_mode != SAVEMODE_CREATE)
+    {
+      *errmsg = safe_asprintf("No such playlist by that name: %s",
+      			      virtual_path);
+      free(virtual_path);
+      return ACK_ERROR_ARG;
+    }
+
+  if (save_mode == SAVEMODE_REPLACE)
+    {
+      library_playlist_remove(virtual_path);
+    }
+
+  if (save_mode == SAVEMODE_APPEND)
+    {
+      struct query_params query_params;
+      struct db_queue_item queue_item;
+
+      /* walk through queue, append one by one */
+      memset(&query_params, 0, sizeof(query_params));
+
+      ret = db_queue_enum_start(&query_params);
+      if (ret < 0)
+    	{
+      	  *errmsg = safe_asprintf("Failed to start queue enum "
+      	  			  "for command save append");
+  	  free(virtual_path);
+      	  return ACK_ERROR_ARG;
+    	}
+
+      while ((ret = db_queue_enum_fetch(&query_params, &queue_item)) == 0 &&
+      	     queue_item.id > 0)
+      	{
+      	  ret = library_playlist_item_add(virtual_path,
+      	  				  queue_item.virtual_path);
+  	  if (ret < 0)
+  	    break;
+      	}
+
+      db_queue_enum_end(&query_params);
+    }
+  else /* SAVEMODE_CREATE/REPLACE */
+    {
+      ret = library_queue_save(virtual_path);
+    }
+
   free(virtual_path);
   if (ret < 0)
     {
@@ -5206,7 +5286,7 @@ static struct mpd_command mpd_handlers[] =
 //    { "playlistmove",               mpd_command_playlistmove,               -1 },
 //    { "rename",                     mpd_command_rename,                     -1 },
     { "rm",                         mpd_command_rm,                          2 },
-    { "save",                       mpd_command_save,                        2 },
+    { "save",                       mpd_command_save,                       -1 },
 
     // The music database
     { "albumart",                   mpd_command_albumart,                    2 },
