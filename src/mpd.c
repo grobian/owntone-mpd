@@ -3267,7 +3267,8 @@ mpd_command_listplaylists(struct evbuffer *evbuf, int argc, char **argv, char **
 
       evbuffer_add_printf(evbuf,
 	  "playlist: %s\n"
-	  "Last-Modified: %s\n",
+	  "Last-Modified: %s\n"
+	  "added: -1\n",  /* MPD v0.24 */
 	  (dbpli.virtual_path + 1),
 	  modified);
     }
