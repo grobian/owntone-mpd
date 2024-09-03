@@ -1120,7 +1120,10 @@ mpd_parse_cmd_filter(char *arg, char *narg, struct mpd_cmd_params *param)
 
       	      	  /* exactmatch is actually "find" commands, which are
       	      	   * case-sensitive, the rest ignore case, promote the
-      	      	   * non-explicit ones (v0.24) */
+      	      	   * non-explicit ones (v0.24)
+      	      	   * further, historically search used strstr behaviour,
+      	      	   * find strcmp, so promote equals to contains when
+      	      	   * used with search */
       	      	  switch (op)
       	      	    {
       	      	    case OP_EQUALS:
@@ -1128,6 +1131,8 @@ mpd_parse_cmd_filter(char *arg, char *narg, struct mpd_cmd_params *param)
       	      	      /* don't promote equals when used on numbers */
       	      	      if (tagtype->type == MPD_TYPE_INT)
       	      	      	break;
+      	      	      if (!exact_match)
+      	      	      	op += 6;
       	      	    case OP_CONTAINS:
       	      	    case OP_NCONTAINS:
       	      	    case OP_STARTSWITH:
