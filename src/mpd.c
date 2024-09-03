@@ -4195,7 +4195,7 @@ mpd_command_search(struct evbuffer *evbuf, int argc, char **argv, char **errmsg,
   struct db_media_file_info dbmfi;
   int ret;
 
-  if (argc < 3 || ((argc - 1) % 2) != 0)
+  if (argc < 2)
     {
       *errmsg = safe_asprintf("Missing argument(s) for command 'search'");
       return ACK_ERROR_ARG;
@@ -4246,7 +4246,7 @@ mpd_command_searchadd(struct evbuffer *evbuf, int argc, char **argv, char **errm
   int ret;
   int pos = -1;
 
-  if (argc < 3 || ((argc - 1) % 2) != 0)
+  if (argc < 2)
     {
       *errmsg = safe_asprintf("Missing argument(s) for command 'search'");
       return ACK_ERROR_ARG;
