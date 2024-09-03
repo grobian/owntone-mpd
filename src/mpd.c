@@ -2705,8 +2705,6 @@ mpd_command_move(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, s
     }
 
   count = end_pos - start_pos;
-  if (count > 1)
-    DPRINTF(E_WARN, L_MPD, "Moving ranges is not supported, only the first item will be moved\n");
 
   if (mpd_parse_cmd_position(argv[2], &param) != 0)
     {
@@ -2714,11 +2712,23 @@ mpd_command_move(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, s
       return ACK_ERROR_ARG;
     }
 
-  ret = db_queue_move_bypos(start_pos, param.pos);
-  if (ret < 0)
+  if (start_pos <= param.pos && end_pos >= param.pos)
     {
-      *errmsg = safe_asprintf("Failed to move song at position %d to %d", start_pos, param.pos);
-      return ACK_ERROR_UNKNOWN;
+      *errmsg = safe_asprintf("Range overlaps with destination: %d-%d -> %d",
+      			      start_pos, end_pos, param.pos);
+      return ACK_ERROR_ARG;
+    }
+
+  while (count-- >= 0)
+    {
+      DPRINTF(E_WARN, L_MPD, "moving %d -> %d\n", start_pos, param.pos);
+      ret = db_queue_move_bypos(start_pos, param.pos);
+      if (ret < 0)
+      	{
+      	  *errmsg = safe_asprintf("Failed to move song at position "
+      	  			  "%d to %d", start_pos, param.pos);
+      	  return ACK_ERROR_UNKNOWN;
+      	}
     }
 
   return 0;
