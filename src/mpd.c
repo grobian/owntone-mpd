@@ -2712,8 +2712,10 @@ mpd_command_move(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, s
   int start_pos;
   int end_pos;
   int count;
-  uint32_t to_pos;
   int ret;
+  struct mpd_cmd_params param;
+
+  memset(&param, 0, sizeof(param));
 
   ret = mpd_pars_range_arg(argv[1], &start_pos, &end_pos);
   if (ret < 0)
@@ -2726,17 +2728,16 @@ mpd_command_move(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, s
   if (count > 1)
     DPRINTF(E_WARN, L_MPD, "Moving ranges is not supported, only the first item will be moved\n");
 
-  ret = safe_atou32(argv[2], &to_pos);
-  if (ret < 0)
+  if (mpd_parse_cmd_position(argv[2], &param) != 0)
     {
       *errmsg = safe_asprintf("Argument doesn't convert to integer: '%s'", argv[2]);
       return ACK_ERROR_ARG;
     }
 
-  ret = db_queue_move_bypos(start_pos, to_pos);
+  ret = db_queue_move_bypos(start_pos, param.pos);
   if (ret < 0)
     {
-      *errmsg = safe_asprintf("Failed to move song at position %d to %d", start_pos, to_pos);
+      *errmsg = safe_asprintf("Failed to move song at position %d to %d", start_pos, param.pos);
       return ACK_ERROR_UNKNOWN;
     }
 
