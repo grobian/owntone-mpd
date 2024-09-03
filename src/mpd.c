@@ -2738,8 +2738,10 @@ static int
 mpd_command_moveid(struct evbuffer *evbuf, int argc, char **argv, char **errmsg, struct mpd_client_ctx *ctx)
 {
   uint32_t songid;
-  uint32_t to_pos;
   int ret;
+  struct mpd_cmd_params param;
+
+  memset(&param, 0, sizeof(param));
 
   ret = safe_atou32(argv[1], &songid);
   if (ret < 0)
@@ -2748,14 +2750,13 @@ mpd_command_moveid(struct evbuffer *evbuf, int argc, char **argv, char **errmsg,
       return ACK_ERROR_ARG;
     }
 
-  ret = safe_atou32(argv[2], &to_pos);
-  if (ret < 0)
+  if (mpd_parse_cmd_position(argv[2], &param) != 0)
     {
       *errmsg = safe_asprintf("Argument doesn't convert to integer: '%s'", argv[2]);
       return ACK_ERROR_ARG;
     }
 
-  ret = db_queue_move_byitemid(songid, to_pos, 0);
+  ret = db_queue_move_byitemid(songid, param.pos, 0);
   if (ret < 0)
     {
       *errmsg = safe_asprintf("Failed to move song with id '%s' to index '%s'", argv[1], argv[2]);
